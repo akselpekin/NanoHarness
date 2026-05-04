@@ -1,28 +1,41 @@
 import json
 import os
 import re
-import sys
-from openai import OpenAI
+from datetime import datetime, timezone
 
-CONFIG_PATH = "../config/config.json"
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_PATH = os.path.join(ROOT_DIR, "config", "config.json")
+SESSIONS_DIR = os.path.join(ROOT_DIR, "sessions")
+
+
+def _workspace_path(path: str) -> str:
+    if not path:
+        path = "."
+    full_path = os.path.abspath(os.path.join(ROOT_DIR, path))
+    if os.path.commonpath([ROOT_DIR, full_path]) != ROOT_DIR:
+        raise ValueError("path is outside workspace")
+    return full_path
+
+
+def _display_path(path: str) -> str:
+    return os.path.relpath(path, ROOT_DIR)
 
 #MARK: TOOLS
 
 def read_file(path: str) -> str:
-    with open(path) as f:
+    with open(_workspace_path(path)) as f:
         return f.read()
 
 
 def list_files(path: str = ".") -> str:
-    if not path:
-        path = "."
+    base_path = _workspace_path(path)
     entries: list[str] = []
-    for root, dirs, files in os.walk(path):
+    for root, dirs, files in os.walk(base_path):
         for d in dirs:
-            rel = os.path.relpath(os.path.join(root, d), path)
+            rel = os.path.relpath(os.path.join(root, d), base_path)
             entries.append(rel + "/")
         for f in files:
-            rel = os.path.relpath(os.path.join(root, f), path)
+            rel = os.path.relpath(os.path.join(root, f), base_path)
             entries.append(rel)
     return json.dumps(entries)
 
@@ -31,23 +44,31 @@ def edit_file(path: str, old_str: str, new_str: str) -> str:
     if not path or old_str == new_str:
         return "error: invalid input parameters"
 
+    full_path = _workspace_path(path)
+
     try:
-        content = open(path).read()
+        content = open(full_path).read()
     except FileNotFoundError:
         if old_str == "":
-            dir_name = os.path.dirname(path)
+            dir_name = os.path.dirname(full_path)
             if dir_name:
                 os.makedirs(dir_name, exist_ok=True)
-            with open(path, "w") as f:
+            with open(full_path, "w") as f:
                 f.write(new_str)
-            return f"Successfully created file {path}"
+            return f"Successfully created file {_display_path(full_path)}"
         return f"error: file not found: {path}"
 
-    if old_str not in content and old_str != "":
-        return "error: old_str not found in file"
+    if old_str == "":
+        return "error: old_str cannot be empty for an existing file"
 
-    new_content = content.replace(old_str, new_str)
-    with open(path, "w") as f:
+    match_count = content.count(old_str)
+    if match_count == 0:
+        return "error: old_str not found in file"
+    if match_count > 1:
+        return "error: old_str matched multiple times"
+
+    new_content = content.replace(old_str, new_str, 1)
+    with open(full_path, "w") as f:
         f.write(new_content)
     return "OK"
 
@@ -164,7 +185,6 @@ def check_policy(policy: str, tool_name: str, arguments: str) -> bool:
     if policy == "deny":
         print(f"\033[91mblocked\033[0m: {tool_name} denied by policy")
         return False
-    # policy == "ask"
     try:
         answer = input(f"\033[93mAllow {tool_name}({arguments})? [y/n]\033[0m: ").strip().lower()
         return answer in ("y", "yes")
@@ -173,10 +193,6 @@ def check_policy(policy: str, tool_name: str, arguments: str) -> bool:
         return False
 
 #MARK: SESSIONS
-
-SESSIONS_DIR = "sessions"
-
-from datetime import datetime, timezone
 
 
 def _sessions_dir() -> str:
@@ -358,6 +374,8 @@ def handle_command(cmd: str, session: dict) -> dict | None:
 
 
 def run():
+    from openai import OpenAI
+
     config = load_config()
 
     api_key = config.get("api_key", os.environ.get("OPENAI_API_KEY", ""))

@@ -157,6 +157,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Agent runtime state
+sessions/
+
 # Spyder project settings
 .spyderproject
 .spyproject
