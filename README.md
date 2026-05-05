@@ -13,7 +13,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-On first launch, NanoHarness creates its app directory and a starter config file.
+On first launch, NanoHarness creates its app directory and a starter config file. On later launches, it checks the config shape and adds missing fields after app updates without overwriting your existing settings.
 
 ## App Data
 
