@@ -1,450 +1,316 @@
 import json
-import os
 import re
-from datetime import datetime, timezone
+import select
+import sys
+import termios
+import tty
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH = os.path.join(ROOT_DIR, "config", "config.json")
-SESSIONS_DIR = os.path.join(ROOT_DIR, "sessions")
-
-
-def _workspace_path(path: str) -> str:
-    if not path:
-        path = "."
-    full_path = os.path.abspath(os.path.join(ROOT_DIR, path))
-    if os.path.commonpath([ROOT_DIR, full_path]) != ROOT_DIR:
-        raise ValueError("path is outside workspace")
-    return full_path
-
-
-def _display_path(path: str) -> str:
-    return os.path.relpath(path, ROOT_DIR)
-
-#MARK: TOOLS
-
-def read_file(path: str) -> str:
-    with open(_workspace_path(path)) as f:
-        return f.read()
-
-
-def list_files(path: str = ".") -> str:
-    base_path = _workspace_path(path)
-    entries: list[str] = []
-    for root, dirs, files in os.walk(base_path):
-        for d in dirs:
-            rel = os.path.relpath(os.path.join(root, d), base_path)
-            entries.append(rel + "/")
-        for f in files:
-            rel = os.path.relpath(os.path.join(root, f), base_path)
-            entries.append(rel)
-    return json.dumps(entries)
-
-
-def edit_file(path: str, old_str: str, new_str: str) -> str:
-    if not path or old_str == new_str:
-        return "error: invalid input parameters"
-
-    full_path = _workspace_path(path)
-
-    try:
-        content = open(full_path).read()
-    except FileNotFoundError:
-        if old_str == "":
-            dir_name = os.path.dirname(full_path)
-            if dir_name:
-                os.makedirs(dir_name, exist_ok=True)
-            with open(full_path, "w") as f:
-                f.write(new_str)
-            return f"Successfully created file {_display_path(full_path)}"
-        return f"error: file not found: {path}"
-
-    if old_str == "":
-        return "error: old_str cannot be empty for an existing file"
-
-    match_count = content.count(old_str)
-    if match_count == 0:
-        return "error: old_str not found in file"
-    if match_count > 1:
-        return "error: old_str matched multiple times"
-
-    new_content = content.replace(old_str, new_str, 1)
-    with open(full_path, "w") as f:
-        f.write(new_content)
-    return "OK"
-
-
-#MARK: TOOL DEFINES
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": (
-                "Read the contents of a given relative file path. "
-                "Use this when you want to see what's inside a file. "
-                "Do not use this with directory names."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "The relative path of a file in the working directory.",
-                    }
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_files",
-            "description": (
-                "List files and directories at a given path. "
-                "If no path is provided, lists files in the current directory."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": (
-                            "Optional relative path to list files from. "
-                            "Defaults to current directory if not provided."
-                        ),
-                    }
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_file",
-            "description": (
-                "Make edits to a text file.\n\n"
-                "Replaces 'old_str' with 'new_str' in the given file. "
-                "'old_str' and 'new_str' MUST be different from each other.\n\n"
-                "If the file specified with path doesn't exist, it will be created."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "The path to the file",
-                    },
-                    "old_str": {
-                        "type": "string",
-                        "description": "Text to search for - must match exactly and must only have one match exactly",
-                    },
-                    "new_str": {
-                        "type": "string",
-                        "description": "Text to replace old_str with",
-                    },
-                },
-                "required": ["path", "old_str", "new_str"],
-            },
-        },
-    },
-]
-
-TOOL_FUNCTIONS = {
-    "read_file": lambda args: read_file(args["path"]),
-    "list_files": lambda args: list_files(args.get("path", ".")),
-    "edit_file": lambda args: edit_file(args["path"], args["old_str"], args["new_str"]),
-}
+from core.auditor import classify_bash_risks, explain_bash_command
+from tools.tools import (
+    DEFAULT_BASH_OUTPUT_CHARS,
+    DEFAULT_BASH_TIMEOUT_SECONDS,
+    MAX_BASH_OUTPUT_CHARS,
+    MAX_BASH_TIMEOUT_SECONDS,
+    TOOLS,
+    resolve_path,
+    run_bash,
+)
 
 #MARK: GOVERNANCE
 
-DEFAULT_POLICIES = {
-    "read_file": "deny",
-    "list_files": "deny",
-    "edit_file": "deny",
-}
+SYSTEM_PROMPT = (
+    "You are NanoHarness, a general-purpose assistant. You can request shell commands with the "
+    "bash tool, but commands require user approval before execution. Use bash only when needed. "
+    "Prefer narrow, safe, read-only commands. Avoid destructive, network, privileged, installation, "
+    "or background commands unless the user explicitly requests them."
+)
 
-def load_config(path: str = CONFIG_PATH) -> dict:
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"policies": dict(DEFAULT_POLICIES)}
+
+class GenerationCancelled(Exception):
+    pass
 
 
 def get_policy(config: dict, tool_name: str) -> str:
-    return config.get("policies", {}).get(
-        tool_name, DEFAULT_POLICIES.get(tool_name, "ask")
-    )
+    return config.get("policies", {}).get(tool_name, "ask")
 
 
-def check_policy(policy: str, tool_name: str, arguments: str) -> bool:
+def check_policy(policy: str, tool_name: str, prompt: str) -> tuple[bool, str]:
     if policy == "allow":
-        return True
+        return True, "allowed"
     if policy == "deny":
         print(f"\033[91mblocked\033[0m: {tool_name} denied by policy")
-        return False
+        return False, "denied_by_policy"
     try:
-        answer = input(f"\033[93mAllow {tool_name}({arguments})? [y/n]\033[0m: ").strip().lower()
-        return answer in ("y", "yes")
+        answer = input(prompt).strip().lower()
+        if answer in ("y", "yes"):
+            return True, "allowed"
+        return False, "denied_by_user"
     except (EOFError, KeyboardInterrupt):
         print()
-        return False
-
-#MARK: SESSIONS
-
-
-def _sessions_dir() -> str:
-    os.makedirs(SESSIONS_DIR, exist_ok=True)
-    return SESSIONS_DIR
-
-
-def _session_path(session_id: str) -> str:
-    return os.path.join(_sessions_dir(), session_id + ".json")
-
-
-def new_session() -> dict:
-    sid = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
-    return {"id": sid, "created": sid, "title": "new session", "messages": []}
-
-
-def save_session(session: dict) -> None:
-    with open(_session_path(session["id"]), "w") as f:
-        json.dump(session, f, indent=2)
-
-
-def load_session(session_id: str) -> dict:
-    with open(_session_path(session_id)) as f:
-        return json.load(f)
-
-
-def delete_session(session_id: str) -> None:
-    path = _session_path(session_id)
-    if os.path.exists(path):
-        os.remove(path)
-
-
-def list_sessions() -> list[dict]:
-    d = _sessions_dir()
-    sessions = []
-    for fname in os.listdir(d):
-        if fname.endswith(".json"):
-            try:
-                with open(os.path.join(d, fname)) as f:
-                    s = json.load(f)
-                sessions.append(s)
-            except (json.JSONDecodeError, KeyError):
-                continue
-    sessions.sort(key=lambda s: s.get("created", ""), reverse=True)
-    return sessions
-
-
-def _auto_title(messages: list[dict]) -> str:
-    for m in messages:
-        if m.get("role") == "user" and isinstance(m.get("content"), str):
-            text = m["content"].strip()
-            return text[:50] + ("..." if len(text) > 50 else "")
-    return "new session"
+        return False, "denied_by_user"
 
 #MARK: REASONING
 
-_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+_SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
 
 
-def _extract_reasoning(message) -> tuple[str, str]:
-    reasoning = ""
-    content = message.content or ""
-
-    rc = getattr(message, "reasoning_content", None)
-    if rc:
-        reasoning = rc
-
-    think_matches = _THINK_RE.findall(content)
-    if think_matches:
-        tag_reasoning = "\n".join(m.strip() for m in think_matches)
-        reasoning = (reasoning + "\n" + tag_reasoning).strip() if reasoning else tag_reasoning
-        content = _THINK_RE.sub("", content).strip()
-
-    return reasoning, content
+def _clean_reasoning(text: str) -> str:
+    return _SYSTEM_REMINDER_RE.sub("", text)
 
 
-def _print_reasoning(reasoning: str) -> None:
-    if reasoning:
-        print(f"\033[2m\033[90mreasoning\033[0m\033[2m: {reasoning}\033[0m")
+def _first_reasoning_field(obj) -> str:
+    fields = [
+        getattr(obj, "reasoning_content", None),
+        getattr(obj, "reasoning", None),
+    ]
+    extra = getattr(obj, "model_extra", None)
+    if isinstance(extra, dict):
+        fields.extend([
+            extra.get("reasoning_content"),
+            extra.get("reasoning"),
+        ])
+        details = extra.get("reasoning_details")
+        if isinstance(details, list):
+            fields.extend(
+                item.get("text") or item.get("content")
+                for item in details
+                if isinstance(item, dict)
+            )
+
+    for field in fields:
+        if isinstance(field, str) and field:
+            return field
+    return ""
+
+
+def _cancel_requested() -> bool:
+    if not sys.stdin.isatty():
+        return False
+    ready, _, _ = select.select([sys.stdin], [], [], 0)
+    if not ready:
+        return False
+    return sys.stdin.read(1) == "\x1b"
+
+
+def _close_stream(stream) -> None:
+    close = getattr(stream, "close", None)
+    if close:
+        close()
+
+
+def _extract_delta_reasoning(delta, state: dict) -> str:
+    reasoning = _clean_reasoning(_first_reasoning_field(delta))
+    if not reasoning:
+        return ""
+
+    previous = state.get("last_reasoning_snapshot", "")
+    if previous and reasoning.startswith(previous):
+        chunk = reasoning[len(previous):]
+        state["last_reasoning_snapshot"] = reasoning
+        return chunk
+
+    state["last_reasoning_snapshot"] = reasoning
+    return reasoning
+
+
+def _accumulate_tool_call(tool_calls: dict[int, dict], delta_tool_call) -> None:
+    index = getattr(delta_tool_call, "index", 0) or 0
+    current = tool_calls.setdefault(index, {
+        "id": "",
+        "type": "function",
+        "function": {"name": "", "arguments": ""},
+    })
+
+    tc_id = getattr(delta_tool_call, "id", None)
+    if tc_id:
+        current["id"] = tc_id
+
+    tc_type = getattr(delta_tool_call, "type", None)
+    if tc_type:
+        current["type"] = tc_type
+
+    function = getattr(delta_tool_call, "function", None)
+    if function:
+        name = getattr(function, "name", None)
+        if name:
+            current["function"]["name"] += name
+        arguments = getattr(function, "arguments", None)
+        if arguments:
+            current["function"]["arguments"] += arguments
+
+
+def _assistant_message(content: str, tool_calls: dict[int, dict]) -> dict:
+    message = {"role": "assistant", "content": content or None}
+    if tool_calls:
+        message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
+    return message
+
+
+def stream_assistant_response(
+    client,
+    model: str,
+    conversation: list[dict],
+    completion_options: dict,
+    show_reasoning: bool,
+) -> dict:
+    old_terminal_settings = None
+    if sys.stdin.isatty():
+        old_terminal_settings = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin)
+
+    content_parts: list[str] = []
+    tool_calls: dict[int, dict] = {}
+    reasoning_state: dict = {}
+    printed_reasoning = False
+    printed_content = False
+
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            tools=TOOLS,
+            messages=conversation,
+            stream=True,
+            **completion_options,
+        )
+
+        for chunk in stream:
+            if _cancel_requested():
+                _close_stream(stream)
+                raise GenerationCancelled
+
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            reasoning = _extract_delta_reasoning(delta, reasoning_state)
+            if show_reasoning and reasoning:
+                if printed_content:
+                    print()
+                    printed_content = False
+                if not printed_reasoning:
+                    print("\033[2m\033[90mreasoning\033[0m\033[2m: ", end="", flush=True)
+                    printed_reasoning = True
+                print(reasoning, end="", flush=True)
+
+            content = getattr(delta, "content", None) or ""
+            if content:
+                if printed_reasoning:
+                    print("\033[0m")
+                    printed_reasoning = False
+                if not printed_content:
+                    print("\033[93mAssistant\033[0m: ", end="", flush=True)
+                    printed_content = True
+                print(content, end="", flush=True)
+                content_parts.append(content)
+
+            for delta_tool_call in getattr(delta, "tool_calls", None) or []:
+                _accumulate_tool_call(tool_calls, delta_tool_call)
+    finally:
+        if old_terminal_settings:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_terminal_settings)
+        if printed_reasoning:
+            print("\033[0m")
+        if printed_content:
+            print()
+
+    return _assistant_message("".join(content_parts), tool_calls)
+
+
+def _completion_options(config: dict) -> dict:
+    options = {}
+    if "max_tokens" in config:
+        options["max_tokens"] = config["max_tokens"]
+    else:
+        options["max_tokens"] = 4096
+
+    extra_body = config.get("extra_body", {})
+    if config.get("reasoning") is not None:
+        extra_body = dict(extra_body)
+        extra_body["reasoning"] = config["reasoning"]
+    if extra_body:
+        options["extra_body"] = extra_body
+    return options
 
 
 #MARK: AGENT
 
-def execute_tool(name: str, arguments: str, config: dict) -> str:
-    fn = TOOL_FUNCTIONS.get(name)
-    if fn is None:
-        return f"error: unknown tool '{name}'"
 
-    policy = get_policy(config, name)
-    if not check_policy(policy, name, arguments):
-        return "error: tool call denied by policy"
+def bash_permission_prompt(command: str, cwd: str, timeout_seconds: int, max_output_chars: int, risks: list[str], explanation: str) -> str:
+    risk_color = "\033[93m" if risks != ["no obvious high-risk pattern detected"] else "\033[92m"
+    return (
+        "\nThe assistant wants to run a command.\n\n"
+        "Auditor explanation:\n"
+        f"  {explanation}\n\n"
+        "Working directory:\n"
+        f"  {cwd}\n\n"
+        "Risk hints:\n"
+        f"  {risk_color}{', '.join(risks)}\033[0m\n\n"
+        "Command:\n"
+        "---\n"
+        f"{command}\n"
+        "---\n\n"
+        f"Timeout: {timeout_seconds} seconds\n"
+        f"Output limit: {max_output_chars} characters each for stdout/stderr\n\n"
+        "Allow this command? [y/n]: "
+    )
+
+
+def _bash_args(arguments: str, config: dict) -> dict:
+    args = json.loads(arguments)
+    bash_config = config.get("bash", {})
+    timeout_seconds = args.get(
+        "timeout_seconds",
+        bash_config.get("timeout_seconds", DEFAULT_BASH_TIMEOUT_SECONDS),
+    )
+    max_output_chars = args.get(
+        "max_output_chars",
+        bash_config.get("max_output_chars", DEFAULT_BASH_OUTPUT_CHARS),
+    )
+    args["timeout_seconds"] = max(1, min(int(timeout_seconds), MAX_BASH_TIMEOUT_SECONDS))
+    args["max_output_chars"] = max(1, min(int(max_output_chars), MAX_BASH_OUTPUT_CHARS))
+    return args
+
+def execute_tool(name: str, arguments: str, config: dict, client, auditor_model: str) -> str:
+    if name != "bash":
+        return f"error: unknown tool '{name}'. Use bash instead."
 
     try:
-        args = json.loads(arguments)
-        return fn(args)
+        args = _bash_args(arguments, config)
+    except Exception as e:
+        return f"error: invalid tool arguments: {e}"
+
+    policy = get_policy(config, name)
+    command = args.get("command", "")
+    cwd = resolve_path(args.get("cwd"))
+    risks = classify_bash_risks(command)
+    try:
+        explanation = explain_bash_command(client, auditor_model, command, cwd, risks)
+    except Exception as e:
+        return f"error: could not audit command before execution: {e}"
+    prompt = bash_permission_prompt(
+        command,
+        cwd,
+        args["timeout_seconds"],
+        args["max_output_chars"],
+        risks,
+        explanation or "The auditor did not return an explanation.",
+    )
+
+    allowed, reason = check_policy(policy, name, prompt)
+    if not allowed:
+        if reason == "denied_by_policy":
+            return "permission_denied: this tool is disabled by policy and cannot be used."
+        return (
+            "permission_denied: the user denied this specific command. "
+            "You may explain why it is needed or ask to try a safer, narrower command."
+        )
+
+    try:
+        return run_bash(
+            args["command"],
+            args.get("cwd"),
+            args["timeout_seconds"],
+            args["max_output_chars"],
+        )
     except Exception as e:
         return f"error: {e}"
-
-
-def handle_command(cmd: str, session: dict) -> dict | None:
-    parts = cmd.strip().split(None, 1)
-    command = parts[0].lower()
-    arg = parts[1] if len(parts) > 1 else ""
-
-    if command == "/sessions":
-        sessions = list_sessions()
-        if not sessions:
-            print("  No saved sessions.")
-        else:
-            for i, s in enumerate(sessions):
-                marker = " *" if s["id"] == session["id"] else ""
-                print(f"  [{i}] {s['title']}  ({s['id']}){marker}")
-        return session
-
-    elif command == "/new":
-        save_session(session)
-        ns = new_session()
-        save_session(ns)
-        print(f"  New session: {ns['id']}")
-        return ns
-
-    elif command == "/switch":
-        if not arg:
-            print("  Usage: /switch <index>")
-            return session
-        sessions = list_sessions()
-        try:
-            idx = int(arg)
-            target = sessions[idx]
-        except (ValueError, IndexError):
-            print(f"  Invalid index: {arg}")
-            return session
-        save_session(session)
-        loaded = load_session(target["id"])
-        print(f"  Switched to: {loaded['title']}  ({loaded['id']})")
-        return loaded
-
-    elif command == "/delete":
-        if not arg:
-            print("  Usage: /delete <index>")
-            return session
-        sessions = list_sessions()
-        try:
-            idx = int(arg)
-            target = sessions[idx]
-        except (ValueError, IndexError):
-            print(f"  Invalid index: {arg}")
-            return session
-        delete_session(target["id"])
-        print(f"  Deleted: {target['title']}  ({target['id']})")
-        if target["id"] == session["id"]:
-            ns = new_session()
-            save_session(ns)
-            print(f"  Started new session: {ns['id']}")
-            return ns
-        return session
-
-    elif command == "/rename":
-        if not arg:
-            print("  Usage: /rename <title>")
-            return session
-        session["title"] = arg
-        save_session(session)
-        print(f"  Renamed to: {arg}")
-        return session
-
-    elif command == "/help":
-        print("  /sessions          List all sessions")
-        print("  /new               Start a new session")
-        print("  /switch <index>    Switch to a session")
-        print("  /delete <index>    Delete a session")
-        print("  /rename <title>    Rename current session")
-        print("  /help              Show this help")
-        return session
-
-    else:
-        print(f"  Unknown command: {command}. Type /help for commands.")
-        return session
-
-
-def run():
-    from openai import OpenAI
-
-    config = load_config()
-
-    api_key = config.get("api_key", os.environ.get("OPENAI_API_KEY", ""))
-    base_url = config.get("base_url", os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
-    model = config.get("model", os.environ.get("OPENAI_MODEL", "gpt-4.1"))
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    session = new_session()
-    save_session(session)
-    conversation = session["messages"]
-
-    print("Chat with the agent (ctrl-c to quit, /help for commands)")
-
-    read_user_input = True
-    while True:
-        if read_user_input:
-            try:
-                user_input = input("\033[94mYou\033[0m: ")
-            except (EOFError, KeyboardInterrupt):
-                save_session(session)
-                print()
-                break
-
-            if user_input.startswith("/"):
-                result = handle_command(user_input, session)
-                if result is None:
-                    break
-                if result["id"] != session["id"]:
-                    session = result
-                    conversation = session["messages"]
-                else:
-                    session = result
-                continue
-
-            conversation.append({"role": "user", "content": user_input})
-            session["title"] = _auto_title(conversation)
-
-        response = client.chat.completions.create(
-            model=model,
-            max_tokens=4096,
-            tools=TOOLS,
-            messages=conversation,
-        )
-        message = response.choices[0].message
-
-        conversation.append(message.model_dump(exclude_none=True))
-
-        reasoning, content = _extract_reasoning(message)
-        _print_reasoning(reasoning)
-
-        if content:
-            print(f"\033[93mAssistant\033[0m: {content}")
-
-        if message.tool_calls:
-            read_user_input = False
-            for tc in message.tool_calls:
-                print(f"\033[92mtool\033[0m: {tc.function.name}({tc.function.arguments})")
-                result = execute_tool(tc.function.name, tc.function.arguments, config)
-                conversation.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                })
-        else:
-            read_user_input = True
-
-        save_session(session)
-
-
-if __name__ == "__main__":
-    run()
