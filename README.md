@@ -103,10 +103,10 @@ Important `config.json` fields:
   "policies": {
     "bash": "ask"
   }
-}
+},
 
 #openrouter reference
-REFERENCE_CONFIG = {
+{
     "api_key": "",
     "base_url": "https://openrouter.ai/api/v1",
     "model": "openai/gpt-5.4-nano",
