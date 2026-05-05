@@ -12,6 +12,7 @@ from core.agent import (
 from core.paths import APP_DIR, CONFIG_PATH, SESSIONS_DIR
 from core.tui import prompt_user
 
+#MARK: Config
 
 def load_config(path: str = CONFIG_PATH) -> dict:
     try:
@@ -40,6 +41,7 @@ def config_status(path: str = CONFIG_PATH) -> str:
     ]
     return "\n  ".join(lines)
 
+#MARK: API
 
 def _api_key_status(config: dict) -> str:
     value = config.get("api_key") or os.environ.get("OPENAI_API_KEY", "")
@@ -48,6 +50,7 @@ def _api_key_status(config: dict) -> str:
         return "API key: not set"
     return f"API key: set via {source} (...{value[-4:]})"
 
+#MARK: Session
 
 def _session_path(session_id: str) -> str:
     return os.path.join(SESSIONS_DIR, session_id + ".json")
@@ -92,6 +95,7 @@ def list_sessions() -> list[dict]:
     sessions.sort(key=lambda s: s.get("created", ""), reverse=True)
     return sessions
 
+#MARK: Auto title
 
 def _auto_title(messages: list[dict]) -> str:
     for m in messages:
@@ -101,11 +105,14 @@ def _auto_title(messages: list[dict]) -> str:
     return "new session"
 
 
+#MARK: Recovery
+
 def _recover_failed_turn(conversation: list[dict], session: dict) -> None:
     if conversation and conversation[-1].get("role") == "user":
         conversation.pop()
     save_session(session)
 
+#MARK: Command handler
 
 def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, dict]:
     parts = cmd.strip().split(None, 1)
@@ -229,6 +236,8 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
         print(f"  Unknown command: {command}. Type /help for commands.")
         return session, config
 
+
+#MARK: Main Loop
 
 def run():
     from openai import APIConnectionError, APIError, AuthenticationError, OpenAI

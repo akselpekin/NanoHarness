@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 
+#MARK: BASH TOOL
 
 DEFAULT_BASH_TIMEOUT_SECONDS = 10
 MAX_BASH_TIMEOUT_SECONDS = 60

@@ -1,5 +1,6 @@
 import re
 
+#MARK: BASH
 
 BASH_RISK_PATTERNS = {
     "deletes files": [r"\brm\b", r"\brmdir\b", r"\bshred\b"],
