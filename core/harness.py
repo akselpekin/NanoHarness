@@ -82,6 +82,15 @@ def delete_session(session_id: str) -> None:
         os.remove(path)
 
 
+def delete_all_sessions() -> int:
+    count = 0
+    for fname in os.listdir(SESSIONS_DIR):
+        if fname.endswith(".json"):
+            os.remove(os.path.join(SESSIONS_DIR, fname))
+            count += 1
+    return count
+
+
 def list_sessions() -> list[dict]:
     sessions = []
     for fname in os.listdir(SESSIONS_DIR):
@@ -153,8 +162,23 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
         return loaded, config
 
     elif command == "/delete":
+        if arg.strip().lower() == "all":
+            try:
+                answer = input("  Delete all sessions? [y/n]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return session, config
+            if answer not in ("y", "yes"):
+                print("  Delete all cancelled.")
+                return session, config
+            count = delete_all_sessions()
+            ns = new_session()
+            save_session(ns)
+            print(f"  Deleted {count} sessions.")
+            print(f"  Started new session: {ns['id']}")
+            return ns, config
         if not arg:
-            print("  Usage: /delete <index>")
+            print("  Usage: /delete <index|all>")
             return session, config
         sessions = list_sessions()
         try:
@@ -186,6 +210,7 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
         print("  /new               Start a new session")
         print("  /switch <index>    Switch to a session")
         print("  /delete <index>    Delete a session")
+        print("  /delete all        Delete all sessions")
         print("  /rename <title>    Rename current session")
         print("  /cwd               Show launch directory for relative paths")
         print("  /config            Show config file lookup status")
