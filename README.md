@@ -89,6 +89,7 @@ At the input prompt, `Ctrl-C` exits the app.
 Important `config.json` fields:
 
 ```json
+#openAI reference
 {
   "api_key": "",
   "base_url": "https://api.openai.com/v1",
@@ -102,6 +103,22 @@ Important `config.json` fields:
   "policies": {
     "bash": "ask"
   }
+}
+
+#openrouter reference
+REFERENCE_CONFIG = {
+    "api_key": "",
+    "base_url": "https://openrouter.ai/api/v1",
+    "model": "openai/gpt-5.4-nano",
+    "auditor_model": "openai/gpt-5.4-nano",
+    "show_reasoning": True,
+    "bash": {
+        "timeout_seconds": 10,
+        "max_output_chars": 12000,
+    },
+    "policies": {
+        "bash": "ask",
+    },
 }
 ```
 
