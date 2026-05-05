@@ -12,6 +12,7 @@ from tools.tools import (
     MAX_BASH_OUTPUT_CHARS,
     MAX_BASH_TIMEOUT_SECONDS,
     TOOLS,
+    bash_script,
     resolve_path,
     run_bash,
 )
@@ -22,6 +23,8 @@ SYSTEM_PROMPT = (
     "You are NanoHarness, a general-purpose assistant. You can execute shell commands with the "
     "bash tool. Use bash if it helps you carry out a task given by the user."
     "You're meant to be more autonomous carry out tasks on your own with tools at your disposal rather than prompting the user."
+    "When a task needs several related shell commands, batch them in one bash call using commands. "
+    "Use separate bash calls when later commands depend on earlier output you need to inspect first."
 )
 
 
@@ -234,23 +237,26 @@ def _completion_options(config: dict) -> dict:
 #MARK: AGENT
 
 
-def bash_permission_prompt(command: str, cwd: str, timeout_seconds: int, max_output_chars: int, risks: list[str], explanation: str) -> str:
+def bash_permission_prompt(commands: list[str], script: str, cwd: str, timeout_seconds: int, max_output_chars: int, risks: list[str], explanation: str, stop_on_error: bool) -> str:
     risk_color = "\033[93m" if risks != ["no obvious high-risk pattern detected"] else "\033[92m"
+    command_block = "\n".join(f"{i}. {command}" for i, command in enumerate(commands, 1)) if len(commands) > 1 else script
+    command_label = "Commands" if len(commands) > 1 else "Command"
     return (
-        "\nThe assistant wants to run a command.\n\n"
+        "\nThe assistant wants to run shell commands.\n\n"
         "Auditor explanation:\n"
         f"  {explanation}\n\n"
         "Working directory:\n"
         f"  {cwd}\n\n"
         "Risk hints:\n"
         f"  {risk_color}{', '.join(risks)}\033[0m\n\n"
-        "Command:\n"
+        f"{command_label}:\n"
         "---\n"
-        f"{command}\n"
+        f"{command_block}\n"
         "---\n\n"
+        f"Stop on error: {'yes' if stop_on_error else 'no'}\n"
         f"Timeout: {timeout_seconds} seconds\n"
         f"Output limit: {max_output_chars} characters each for stdout/stderr\n\n"
-        "Allow this command? [y/n]: "
+        "Allow this shell request? [y/n]: "
     )
 
 
@@ -267,6 +273,10 @@ def _bash_args(arguments: str, config: dict) -> dict:
     )
     args["timeout_seconds"] = max(1, min(int(timeout_seconds), MAX_BASH_TIMEOUT_SECONDS))
     args["max_output_chars"] = max(1, min(int(max_output_chars), MAX_BASH_OUTPUT_CHARS))
+    script, commands, stop_on_error = bash_script(args)
+    args["command"] = script
+    args["_commands"] = commands
+    args["_stop_on_error"] = stop_on_error
     return args
 
 def execute_tool(name: str, arguments: str, config: dict, client, auditor_model: str) -> str:
@@ -279,20 +289,24 @@ def execute_tool(name: str, arguments: str, config: dict, client, auditor_model:
         return f"error: invalid tool arguments: {e}"
 
     policy = get_policy(config, name)
-    command = args.get("command", "")
+    command = args["command"]
+    commands = args["_commands"]
+    stop_on_error = args["_stop_on_error"]
     cwd = resolve_path(args.get("cwd"))
     risks = classify_bash_risks(command)
     try:
-        explanation = explain_bash_command(client, auditor_model, command, cwd, risks)
+        explanation = explain_bash_command(client, auditor_model, commands, command, cwd, risks)
     except Exception as e:
         return f"error: could not audit command before execution: {e}"
     prompt = bash_permission_prompt(
+        commands,
         command,
         cwd,
         args["timeout_seconds"],
         args["max_output_chars"],
         risks,
         explanation or "The auditor did not return an explanation.",
+        stop_on_error,
     )
 
     allowed, reason = check_policy(policy, name, prompt)

@@ -43,7 +43,9 @@ def classify_bash_risks(command: str) -> list[str]:
     return risks or ["no obvious high-risk pattern detected"]
 
 
-def explain_bash_command(client, auditor_model: str, command: str, cwd: str, risks: list[str]) -> str:
+def explain_bash_command(client, auditor_model: str, commands: list[str], script: str, cwd: str, risks: list[str]) -> str:
+    command_label = "Commands" if len(commands) > 1 else "Command"
+    command_text = "\n".join(f"{i}. {command}" for i, command in enumerate(commands, 1))
     response = client.chat.completions.create(
         model=auditor_model,
         messages=[
@@ -58,11 +60,14 @@ def explain_bash_command(client, auditor_model: str, command: str, cwd: str, ris
             {
                 "role": "user",
                 "content": (
-                    "Explain what this command would do before it runs.\n"
+                    "Explain what this shell request would do before it runs. "
+                    "If there are multiple commands, summarize the sequence and mention meaningful dependencies.\n"
                     f"Working directory: {cwd}\n"
                     f"Risk hints: {', '.join(risks)}\n"
-                    "Command:\n"
-                    f"{command}"
+                    f"{command_label}:\n"
+                    f"{command_text}\n"
+                    "Full Bash script:\n"
+                    f"{script}"
                 ),
             },
         ],
