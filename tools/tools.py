@@ -87,9 +87,7 @@ TOOLS = [
         "function": {
             "name": "bash",
             "description": (
-                "Request execution of a shell command on the user's machine. "
-                "Use only when necessary. Prefer narrow, safe, read-only commands. "
-                "Commands require user approval before execution."
+                "Request execution of a shell command on the user's machine."
             ),
             "parameters": {
                 "type": "object",

@@ -8,7 +8,7 @@ REFERENCE_CONFIG = {
     "api_key": "",
     "base_url": "https://openrouter.ai/api/v1",
     "model": "openai/gpt-5-nano",
-    "auditor_model": "openai/gpt-5-nano",
+    "auditor_model": "openai/gpt-5.4-nano",
     "show_reasoning": True,
     "bash": {
         "timeout_seconds": 10,

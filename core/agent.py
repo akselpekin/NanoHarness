@@ -19,10 +19,9 @@ from tools.tools import (
 #MARK: GOVERNANCE
 
 SYSTEM_PROMPT = (
-    "You are NanoHarness, a general-purpose assistant. You can request shell commands with the "
-    "bash tool, but commands require user approval before execution. Use bash only when needed. "
-    "Prefer narrow, safe, read-only commands. Avoid destructive, network, privileged, installation, "
-    "or background commands unless the user explicitly requests them."
+    "You are NanoHarness, a general-purpose assistant. You can execute shell commands with the "
+    "bash tool. Use bash if it helps you carry out a task given by the user."
+    "You're meant to be more autonomous carry out tasks on your own with tools at your disposal rather than prompting the user."
 )
 
 
@@ -302,7 +301,7 @@ def execute_tool(name: str, arguments: str, config: dict, client, auditor_model:
             return "permission_denied: this tool is disabled by policy and cannot be used."
         return (
             "permission_denied: the user denied this specific command. "
-            "You may explain why it is needed or ask to try a safer, narrower command."
+            "You may explain why it is needed or ask to try a different command."
         )
 
     try:
