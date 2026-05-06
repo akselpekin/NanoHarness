@@ -12,6 +12,20 @@ from core.agent import (
 from core.paths import APP_DIR, CONFIG_PATH, SESSIONS_DIR
 from core.tui import prompt_user
 
+#MARK: RUNTIME
+
+def build_runtime(config: dict, openai_cls) -> dict:
+    api_key = config.get("api_key", os.environ.get("OPENAI_API_KEY", ""))
+    base_url = config.get("base_url", os.environ.get("OPENAI_BASE_URL", ""))
+    model = config.get("model", os.environ.get("OPENAI_MODEL", ""))
+    return {
+        "client": openai_cls(api_key=api_key, base_url=base_url),
+        "model": model,
+        "auditor_model": config.get("auditor_model", model),
+        "completion_options": _completion_options(config),
+        "show_reasoning": config.get("show_reasoning", True),
+    }
+
 #MARK: Config
 
 def load_config(path: str = CONFIG_PATH) -> dict:
@@ -150,7 +164,7 @@ def _recover_failed_turn(conversation: list[dict], session: dict) -> None:
 
 #MARK: Command handler
 
-def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, dict]:
+def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, dict, bool]:
     parts = cmd.strip().split(None, 1)
     command = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
@@ -163,30 +177,30 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
             for i, s in enumerate(sessions):
                 marker = " *" if s["id"] == session["id"] else ""
                 print(f"  [{i}] {s['title']}  ({s['id']}){marker}")
-        return session, config
+        return session, config, False
 
     elif command == "/new":
         save_session(session)
         ns = new_session()
         save_session(ns)
         print(f"  New session: {ns['id']}")
-        return ns, config
+        return ns, config, False
 
     elif command == "/switch":
         if not arg:
             print("  Usage: /switch <index>")
-            return session, config
+            return session, config, False
         sessions = list_sessions()
         try:
             idx = int(arg)
             target = sessions[idx]
         except (ValueError, IndexError):
             print(f"  Invalid index: {arg}")
-            return session, config
+            return session, config, False
         save_session(session)
         loaded = load_session(target["id"])
         print(f"  Switched to: {loaded['title']}  ({loaded['id']})")
-        return loaded, config
+        return loaded, config, False
 
     elif command == "/delete":
         if arg.strip().lower() == "all":
@@ -194,43 +208,43 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
                 answer = input("  Delete all sessions? [y/n]: ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 print()
-                return session, config
+                return session, config, False
             if answer not in ("y", "yes"):
                 print("  Delete all cancelled.")
-                return session, config
+                return session, config, False
             count = delete_all_sessions()
             ns = new_session()
             save_session(ns)
             print(f"  Deleted {count} sessions.")
             print(f"  Started new session: {ns['id']}")
-            return ns, config
+            return ns, config, False
         if not arg:
             print("  Usage: /delete <index|all>")
-            return session, config
+            return session, config, False
         sessions = list_sessions()
         try:
             idx = int(arg)
             target = sessions[idx]
         except (ValueError, IndexError):
             print(f"  Invalid index: {arg}")
-            return session, config
+            return session, config, False
         delete_session(target["id"])
         print(f"  Deleted: {target['title']}  ({target['id']})")
         if target["id"] == session["id"]:
             ns = new_session()
             save_session(ns)
             print(f"  Started new session: {ns['id']}")
-            return ns, config
-        return session, config
+            return ns, config, False
+        return session, config, False
 
     elif command == "/rename":
         if not arg:
             print("  Usage: /rename <title>")
-            return session, config
+            return session, config, False
         session["title"] = arg
         save_session(session)
         print(f"  Renamed to: {arg}")
-        return session, config
+        return session, config, False
 
     elif command == "/help":
         print("  /sessions          List all sessions")
@@ -246,13 +260,13 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
         print("  /apikey set        Add or overwrite API key")
         print("  /apikey delete     Delete API key from config")
         print("  /help              Show this help")
-        return session, config
+        return session, config, False
 
     elif command == "/cwd":
         if not arg:
             print(f"  Launch directory: {os.getcwd()}")
             print(f"  {working_directory_status(config)}")
-            return session, config
+            return session, config, False
         parts = arg.split(None, 1)
         if parts[0].lower() == "set" and len(parts) == 2:
             candidate = parts[1].strip()
@@ -260,36 +274,36 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
             if warning:
                 print(f"  Invalid working directory: {candidate}")
                 print(f"  {warning}")
-                return session, config
+                return session, config, False
             config["working_directory"] = candidate
             save_config(config)
             print(f"  Working directory set to: {resolved}")
-            return session, config
+            return session, config, False
         print("  Usage: /cwd or /cwd set <path>")
-        return session, config
+        return session, config, False
 
     elif command == "/config":
         print(f"  Config: {config_status()}")
-        return session, config
+        return session, config, False
 
     elif command == "/apikey":
         subcommand = arg.strip().lower()
         if not subcommand:
             print(f"  {_api_key_status(config)}")
-            return session, config
+            return session, config, False
         if subcommand in ("set", "add", "overwrite"):
             try:
                 api_key = input("  New API key: ").strip()
             except (EOFError, KeyboardInterrupt):
                 print()
-                return session, config
+                return session, config, False
             if not api_key:
                 print("  API key unchanged: empty value")
-                return session, config
+                return session, config, False
             config["api_key"] = api_key
             save_config(config)
             print(f"  API key saved to {CONFIG_PATH}")
-            return session, config
+            return session, config, True
         if subcommand in ("delete", "remove", "clear"):
             if "api_key" in config:
                 del config["api_key"]
@@ -297,13 +311,13 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
                 print(f"  API key deleted from {CONFIG_PATH}")
             else:
                 print("  API key is not set in config")
-            return session, config
+            return session, config, True
         print("  Usage: /apikey [set|delete]")
-        return session, config
+        return session, config, False
 
     else:
         print(f"  Unknown command: {command}. Type /help for commands.")
-        return session, config
+        return session, config, False
 
 
 #MARK: Main Loop
@@ -313,19 +327,12 @@ def run():
 
     config = load_config()
 
-    api_key = config.get("api_key", os.environ.get("OPENAI_API_KEY", ""))
-    base_url = config.get("base_url", os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
-    model = config.get("model", os.environ.get("OPENAI_MODEL", "gpt-4.1"))
-    auditor_model = config.get("auditor_model", model)
-    completion_options = _completion_options(config)
-    show_reasoning = config.get("show_reasoning", True)
-
     try:
-        client = OpenAI(api_key=api_key, base_url=base_url)
+        runtime = build_runtime(config, OpenAI)
     except Exception as e:
         print(f"\033[91mconfiguration error\033[0m: {e}")
         print(f"Set OPENAI_API_KEY, OPENAI_BASE_URL, and OPENAI_MODEL or update {CONFIG_PATH}.")
-        return
+        runtime = None
 
     session = new_session()
     save_session(session)
@@ -344,7 +351,14 @@ def run():
                 break
 
             if user_input.startswith("/"):
-                result, config = handle_command(user_input, session, config)
+                result, config, config_changed = handle_command(user_input, session, config)
+                if config_changed:
+                    try:
+                        runtime = build_runtime(config, OpenAI)
+                        print("  Runtime reloaded.")
+                    except Exception as e:
+                        print(f"\033[91mconfiguration error\033[0m: {e}")
+                        runtime = None
                 if result is None:
                     break
                 if result["id"] != session["id"]:
@@ -360,13 +374,19 @@ def run():
             conversation.append({"role": "user", "content": user_input})
             session["title"] = _auto_title(conversation)
 
+        if runtime is None:
+            print("\033[91mconfiguration error\033[0m: model client is unavailable. Run /apikey set or fix config.")
+            read_user_input = True
+            _recover_failed_turn(conversation, session)
+            continue
+
         try:
             assistant_message = stream_assistant_response(
-                client,
-                model,
+                runtime["client"],
+                runtime["model"],
                 conversation,
-                completion_options,
-                show_reasoning,
+                runtime["completion_options"],
+                runtime["show_reasoning"],
             )
         except (GenerationCancelled, KeyboardInterrupt):
             print("\033[91mcancelled\033[0m: model generation stopped")
@@ -404,7 +424,7 @@ def run():
             for tc in assistant_message["tool_calls"]:
                 function = tc["function"]
                 print(f"\033[92mtool\033[0m: {function['name']}({function['arguments']})")
-                result = execute_tool(function["name"], function["arguments"], config, client, auditor_model)
+                result = execute_tool(function["name"], function["arguments"], config, runtime["client"], runtime["auditor_model"])
                 conversation.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
