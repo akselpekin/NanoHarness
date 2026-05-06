@@ -59,13 +59,19 @@ Common commands:
 
 At the prompt, arrow keys work for editing and history navigation.
 
-## Shell Access
+## Tools
 
-NanoHarness exposes one tool to the model:
+NanoHarness exposes structured tools to the model:
 
+- `list_files` lists files and directories with capped output.
+- `read_file` reads bounded text content from a file.
+- `write_file` creates, overwrites, appends, or replaces text in a file.
+- `read_document` extracts bounded text from text-based PDFs and text-like files.
+- `web_search` searches the web for relevant pages using a best-effort DuckDuckGo HTML search.
+- `fetch_url` fetches text from an HTTP or HTTPS URL with GET.
 - `bash` requests execution of a shell command on your machine.
 
-Before a command runs, NanoHarness:
+Structured file and HTTP tools ask for approval directly. Before a Bash command runs, NanoHarness:
 
 1. Asks the auditor model to explain the command in plain language.
 2. Shows local risk hints.
@@ -103,7 +109,13 @@ Important `config.json` fields:
     "max_output_chars": 12000
   },
   "policies": {
-    "bash": "ask"
+    "bash": "ask",
+    "list_files": "ask",
+    "read_file": "ask",
+    "write_file": "ask",
+    "read_document": "ask",
+    "web_search": "ask",
+    "fetch_url": "ask"
   }
 },
 
@@ -121,6 +133,12 @@ Important `config.json` fields:
     },
     "policies": {
         "bash": "ask",
+        "list_files": "ask",
+        "read_file": "ask",
+        "write_file": "ask",
+        "read_document": "ask",
+        "web_search": "ask",
+        "fetch_url": "ask"
     },
 }
 ```

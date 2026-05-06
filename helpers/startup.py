@@ -5,7 +5,7 @@ from datetime import datetime
 from core.paths import APP_DIR, CONFIG_PATH, SESSIONS_DIR
 
 
-CONFIG_VERSION = "v2"
+CONFIG_VERSION = "v5"
 
 REFERENCE_CONFIG = {
     "config_version": CONFIG_VERSION,
@@ -21,6 +21,12 @@ REFERENCE_CONFIG = {
     },
     "policies": {
         "bash": "ask",
+        "list_files": "ask",
+        "read_file": "ask",
+        "write_file": "ask",
+        "fetch_url": "ask",
+        "read_document": "ask",
+        "web_search": "ask",
     },
 }
 

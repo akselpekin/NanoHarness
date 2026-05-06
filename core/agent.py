@@ -7,16 +7,16 @@ import termios
 import tty
 
 from core.auditor import classify_bash_risks, explain_bash_command
-from tools.tools import (
+from tools.bash import (
     DEFAULT_BASH_OUTPUT_CHARS,
     DEFAULT_BASH_TIMEOUT_SECONDS,
     MAX_BASH_OUTPUT_CHARS,
     MAX_BASH_TIMEOUT_SECONDS,
-    TOOLS,
     bash_script,
-    resolve_path,
     run_bash,
 )
+from tools.common import resolve_path
+from tools.registry import STRUCTURED_TOOL_HANDLERS, TOOLS
 
 #MARK: GOVERNANCE
 
@@ -24,11 +24,14 @@ SYSTEM_PROMPT = (
     "You are NanoHarness, a general-purpose assistant. You can execute shell commands with the "
     "bash tool. Use bash if it helps you carry out a task given by the user. "
     "You're meant to be more autonomous: carry out tasks on your own with tools at your disposal rather than prompting the user. "
+    "Prefer structured tools for filesystem, document, web search, and HTTP tasks. Use list_files, read_file, write_file, read_document, web_search, and fetch_url when they fit. "
+    "Use web_search to discover relevant pages and fetch_url to retrieve a known URL. "
+    "Use bash when structured tools are insufficient, shell execution is specifically useful or user requests it. "
     "Bash commands run from the configured working directory unless you provide cwd. "
     "Relative cwd values resolve from the configured working directory. "
     "When a task needs several related shell commands, batch them in one bash call using commands. "
     "Use separate bash calls when later commands depend on earlier output you need to inspect first. "
-    "If the user rejects a bash command, treat it as feedback on that specific command, not as a permanent restriction on bash. "
+    "If the user rejects a tool, treat it as feedback on that specific tool request, not as a permanent restriction on said tool. "
     "Use the rejection reason to continue."
 )
 
@@ -293,6 +296,17 @@ def _bash_args(arguments: str, config: dict) -> dict:
     args["_stop_on_error"] = stop_on_error
     return args
 
+
+def structured_permission_prompt(name: str, args: dict, base_cwd: str) -> str:
+    details = []
+    if "path" in args:
+        details.append(f"Path: {resolve_path(args.get('path'), base_cwd)}")
+    if "url" in args:
+        details.append(f"URL: {args.get('url')}")
+    if "mode" in args:
+        details.append(f"Mode: {args.get('mode')}")
+    return "\n".join([f"Allow {name}?", *details, "[y/n]: "])
+
 def _working_directory(config: dict) -> tuple[str, str | None]:
     configured = config.get("working_directory", ".")
     if not isinstance(configured, str) or not configured.strip():
@@ -302,10 +316,11 @@ def _working_directory(config: dict) -> tuple[str, str | None]:
         return resolve_path("."), f"configured working_directory is invalid: {configured}; using launch directory"
     return resolved, None
 
+#MARK: Unstructured tools
 
 def execute_tool(name: str, arguments: str, config: dict, client, auditor_model: str) -> str:
     if name != "bash":
-        return f"error: unknown tool '{name}'. Use bash instead."
+        return execute_structured_tool(name, arguments, config)
 
     try:
         args = _bash_args(arguments, config)
@@ -352,5 +367,34 @@ def execute_tool(name: str, arguments: str, config: dict, client, auditor_model:
             args["max_output_chars"],
             base_cwd,
         )
+    except Exception as e:
+        return f"error: {e}"
+
+#MARK: Structured tools
+
+def execute_structured_tool(name: str, arguments: str, config: dict) -> str:
+    handler = STRUCTURED_TOOL_HANDLERS.get(name)
+    if handler is None:
+        return f"error: unknown tool '{name}'."
+    try:
+        args = json.loads(arguments)
+    except Exception as e:
+        return f"error: invalid tool arguments: {e}"
+
+    base_cwd, _ = _working_directory(config)
+    allowed, reason, rejection_reason = check_policy(
+        get_policy(config, name),
+        name,
+        structured_permission_prompt(name, args, base_cwd),
+    )
+    if not allowed:
+        if reason == "denied_by_policy":
+            return f"permission_denied: the {name} tool is disabled by policy and cannot be used."
+        return (
+            f"rejected_by_user: The user rejected this specific {name} request. "
+            f"Reason: {rejection_reason}. Continue working toward the user's original goal, the rejection reason might include instructions consider them."
+        )
+    try:
+        return handler(args, base_cwd)
     except Exception as e:
         return f"error: {e}"
