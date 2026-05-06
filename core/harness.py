@@ -33,12 +33,39 @@ def save_config(config: dict, path: str = CONFIG_PATH) -> None:
 
 
 def config_status(path: str = CONFIG_PATH) -> str:
+    config = load_config(path)
     lines = [
         f"App home: {APP_DIR}",
         f"Sessions: {SESSIONS_DIR}",
         f"Launch directory: {os.getcwd()}",
+        working_directory_status(config),
         f"Config: {path}",
     ]
+    return "\n  ".join(lines)
+
+
+def resolve_working_directory(config: dict, value: str | None = None) -> tuple[str, str | None]:
+    configured = config.get("working_directory", ".") if value is None else value
+    if not isinstance(configured, str) or not configured.strip():
+        configured = "."
+    expanded = os.path.expanduser(configured)
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(os.getcwd(), expanded)
+    resolved = os.path.abspath(expanded)
+    if not os.path.isdir(resolved):
+        return os.getcwd(), f"configured working_directory is invalid: {configured}; using launch directory"
+    return resolved, None
+
+
+def working_directory_status(config: dict) -> str:
+    configured = config.get("working_directory", ".")
+    resolved, warning = resolve_working_directory(config)
+    lines = [
+        f"Configured working directory: {configured}",
+        f"Resolved working directory: {resolved}",
+    ]
+    if warning:
+        lines.append(f"Warning: {warning}")
     return "\n  ".join(lines)
 
 #MARK: API
@@ -212,7 +239,8 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
         print("  /delete <index>    Delete a session")
         print("  /delete all        Delete all sessions")
         print("  /rename <title>    Rename current session")
-        print("  /cwd               Show launch directory for relative paths")
+        print("  /cwd               Show working directory status")
+        print("  /cwd set <path>    Set working directory")
         print("  /config            Show config file lookup status")
         print("  /apikey            Show API key status")
         print("  /apikey set        Add or overwrite API key")
@@ -221,7 +249,23 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
         return session, config
 
     elif command == "/cwd":
-        print(f"  Relative paths resolve from: {os.getcwd()}")
+        if not arg:
+            print(f"  Launch directory: {os.getcwd()}")
+            print(f"  {working_directory_status(config)}")
+            return session, config
+        parts = arg.split(None, 1)
+        if parts[0].lower() == "set" and len(parts) == 2:
+            candidate = parts[1].strip()
+            resolved, warning = resolve_working_directory(config, candidate)
+            if warning:
+                print(f"  Invalid working directory: {candidate}")
+                print(f"  {warning}")
+                return session, config
+            config["working_directory"] = candidate
+            save_config(config)
+            print(f"  Working directory set to: {resolved}")
+            return session, config
+        print("  Usage: /cwd or /cwd set <path>")
         return session, config
 
     elif command == "/config":

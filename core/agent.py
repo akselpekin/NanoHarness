@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import select
 import sys
@@ -21,10 +22,14 @@ from tools.tools import (
 
 SYSTEM_PROMPT = (
     "You are NanoHarness, a general-purpose assistant. You can execute shell commands with the "
-    "bash tool. Use bash if it helps you carry out a task given by the user."
-    "You're meant to be more autonomous carry out tasks on your own with tools at your disposal rather than prompting the user."
+    "bash tool. Use bash if it helps you carry out a task given by the user. "
+    "You're meant to be more autonomous: carry out tasks on your own with tools at your disposal rather than prompting the user. "
+    "Bash commands run from the configured working directory unless you provide cwd. "
+    "Relative cwd values resolve from the configured working directory. "
     "When a task needs several related shell commands, batch them in one bash call using commands. "
-    "Use separate bash calls when later commands depend on earlier output you need to inspect first."
+    "Use separate bash calls when later commands depend on earlier output you need to inspect first. "
+    "If the user rejects a bash command, treat it as feedback on that specific command, not as a permanent restriction on bash. "
+    "Use the rejection reason to continue."
 )
 
 
@@ -36,20 +41,29 @@ def get_policy(config: dict, tool_name: str) -> str:
     return config.get("policies", {}).get(tool_name, "ask")
 
 
-def check_policy(policy: str, tool_name: str, prompt: str) -> tuple[bool, str]:
+def _rejection_reason() -> str:
+    try:
+        reason = input("Reason for rejection (optional): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return "no reason provided"
+    return reason or "no reason provided"
+
+
+def check_policy(policy: str, tool_name: str, prompt: str) -> tuple[bool, str, str]:
     if policy == "allow":
-        return True, "allowed"
+        return True, "allowed", ""
     if policy == "deny":
         print(f"\033[91mblocked\033[0m: {tool_name} denied by policy")
-        return False, "denied_by_policy"
+        return False, "denied_by_policy", ""
     try:
         answer = input(prompt).strip().lower()
         if answer in ("y", "yes"):
-            return True, "allowed"
-        return False, "denied_by_user"
+            return True, "allowed", ""
+        return False, "rejected_by_user", _rejection_reason()
     except (EOFError, KeyboardInterrupt):
         print()
-        return False, "denied_by_user"
+        return False, "rejected_by_user", "no reason provided"
 
 #MARK: REASONING
 
@@ -279,6 +293,16 @@ def _bash_args(arguments: str, config: dict) -> dict:
     args["_stop_on_error"] = stop_on_error
     return args
 
+def _working_directory(config: dict) -> tuple[str, str | None]:
+    configured = config.get("working_directory", ".")
+    if not isinstance(configured, str) or not configured.strip():
+        configured = "."
+    resolved = resolve_path(configured)
+    if not os.path.isdir(resolved):
+        return resolve_path("."), f"configured working_directory is invalid: {configured}; using launch directory"
+    return resolved, None
+
+
 def execute_tool(name: str, arguments: str, config: dict, client, auditor_model: str) -> str:
     if name != "bash":
         return f"error: unknown tool '{name}'. Use bash instead."
@@ -292,7 +316,8 @@ def execute_tool(name: str, arguments: str, config: dict, client, auditor_model:
     command = args["command"]
     commands = args["_commands"]
     stop_on_error = args["_stop_on_error"]
-    cwd = resolve_path(args.get("cwd"))
+    base_cwd, cwd_warning = _working_directory(config)
+    cwd = resolve_path(args.get("cwd"), base_cwd)
     risks = classify_bash_risks(command)
     try:
         explanation = explain_bash_command(client, auditor_model, commands, command, cwd, risks)
@@ -305,17 +330,18 @@ def execute_tool(name: str, arguments: str, config: dict, client, auditor_model:
         args["timeout_seconds"],
         args["max_output_chars"],
         risks,
-        explanation or "The auditor did not return an explanation.",
+        (explanation or "The auditor did not return an explanation.") + (f" Warning: {cwd_warning}" if cwd_warning else ""),
         stop_on_error,
     )
 
-    allowed, reason = check_policy(policy, name, prompt)
+    allowed, reason, rejection_reason = check_policy(policy, name, prompt)
     if not allowed:
         if reason == "denied_by_policy":
-            return "permission_denied: this tool is disabled by policy and cannot be used."
+            return "permission_denied: the bash tool is disabled by policy and cannot be used."
         return (
-            "permission_denied: the user denied this specific command. "
-            "You may explain why it is needed or ask to try a different command."
+            "rejected_by_user: The user rejected this specific bash command. "
+            f"Reason: {rejection_reason}. "
+            "Continue working toward the user's original goal, the rejection reason might include instructions consider them. Bash remains available."
         )
 
     try:
@@ -324,6 +350,7 @@ def execute_tool(name: str, arguments: str, config: dict, client, auditor_model:
             args.get("cwd"),
             args["timeout_seconds"],
             args["max_output_chars"],
+            base_cwd,
         )
     except Exception as e:
         return f"error: {e}"

@@ -5,7 +5,7 @@ from datetime import datetime
 from core.paths import APP_DIR, CONFIG_PATH, SESSIONS_DIR
 
 
-CONFIG_VERSION = "v1"
+CONFIG_VERSION = "v2"
 
 REFERENCE_CONFIG = {
     "config_version": CONFIG_VERSION,
@@ -13,6 +13,7 @@ REFERENCE_CONFIG = {
     "base_url": "https://openrouter.ai/api/v1",
     "model": "openai/gpt-5-nano",
     "auditor_model": "openai/gpt-5.4-nano",
+    "working_directory": ".",
     "show_reasoning": True,
     "bash": {
         "timeout_seconds": 10,

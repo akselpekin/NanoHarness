@@ -10,12 +10,12 @@ DEFAULT_BASH_OUTPUT_CHARS = 12000
 MAX_BASH_OUTPUT_CHARS = 50000
 
 
-def resolve_path(path: str | None = None) -> str:
+def resolve_path(path: str | None = None, base: str | None = None) -> str:
     if not path:
         path = "."
     expanded = os.path.expanduser(path)
     if not os.path.isabs(expanded):
-        expanded = os.path.join(os.getcwd(), expanded)
+        expanded = os.path.join(base or os.getcwd(), expanded)
     return os.path.abspath(expanded)
 
 
@@ -47,11 +47,12 @@ def run_bash(
     cwd: str | None = None,
     timeout_seconds: int = DEFAULT_BASH_TIMEOUT_SECONDS,
     max_output_chars: int = DEFAULT_BASH_OUTPUT_CHARS,
+    base_cwd: str | None = None,
 ) -> str:
     if not command or not command.strip():
         return json.dumps({"error": "empty command"})
 
-    resolved_cwd = resolve_path(cwd)
+    resolved_cwd = resolve_path(cwd, base_cwd)
     if not os.path.isdir(resolved_cwd):
         return json.dumps({"error": f"not a directory: {cwd or '.'}"})
 
@@ -124,7 +125,7 @@ TOOLS = [
                     },
                     "cwd": {
                         "type": "string",
-                        "description": "Optional working directory. Relative paths resolve from the launch directory.",
+                        "description": "Optional working directory. Relative paths resolve from the configured working directory.",
                     },
                     "timeout_seconds": {
                         "type": "integer",

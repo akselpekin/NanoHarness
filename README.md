@@ -52,7 +52,8 @@ Common commands:
 /switch <index>  Switch to a session
 /delete <index>  Delete a session
 /rename <title>  Rename current session
-/cwd             Show where relative shell paths resolve from
+/cwd             Show working directory status
+/cwd set <path>  Set working directory
 /config          Show app/config/session paths
 ```
 
@@ -95,6 +96,7 @@ Important `config.json` fields:
   "base_url": "https://api.openai.com/v1",
   "model": "gpt-4.1",
   "auditor_model": "gpt-4.1",
+  "working_directory": ".",
   "show_reasoning": true,
   "bash": {
     "timeout_seconds": 10,
