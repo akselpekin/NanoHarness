@@ -113,7 +113,8 @@ Important `config.json` fields:
     "base_url": "https://openrouter.ai/api/v1",
     "model": "openai/gpt-5.4-nano",
     "auditor_model": "openai/gpt-5.4-nano",
-    "show_reasoning": True,
+    "working_directory": ".",
+    "show_reasoning": true,
     "bash": {
         "timeout_seconds": 10,
         "max_output_chars": 12000,
