@@ -98,8 +98,9 @@ At the input prompt, `Ctrl-C` exits the app.
 
 Important `config.json` fields:
 
+OpenAI-compatible example:
+
 ```json
-#openAI reference
 {
   "api_key": "",
   "base_url": "https://api.openai.com/v1",
@@ -128,37 +129,40 @@ Important `config.json` fields:
     "web_search": "ask",
     "fetch_url": "ask"
   }
-},
+}
+```
 
-#openrouter reference
+OpenRouter example:
+
+```json
 {
-    "api_key": "",
-    "base_url": "https://openrouter.ai/api/v1",
-    "model": "openai/gpt-5.4-nano",
-    "auditor_model": "openai/gpt-5.4-nano",
-    "summary_model": "openai/gpt-5.4-nano",
-    "working_directory": ".",
-    "show_reasoning": true,
-    "bash": {
-        "timeout_seconds": 10,
-        "max_output_chars": 12000,
-    },
-    "context": {
-      "recent_messages": 40,
-      "max_tool_output_chars": 8000,
-      "max_message_chars": 20000,
-      "auto_summarize": false,
-      "summarize_after_messages": 80
-    },
-    "policies": {
-        "bash": "ask",
-        "list_files": "ask",
-        "read_file": "ask",
-        "write_file": "ask",
-        "read_document": "ask",
-        "web_search": "ask",
-        "fetch_url": "ask"
-    },
+  "api_key": "",
+  "base_url": "https://openrouter.ai/api/v1",
+  "model": "openai/gpt-5.4-nano",
+  "auditor_model": "openai/gpt-5.4-nano",
+  "summary_model": "openai/gpt-5.4-nano",
+  "working_directory": ".",
+  "show_reasoning": true,
+  "bash": {
+    "timeout_seconds": 10,
+    "max_output_chars": 12000
+  },
+  "context": {
+    "recent_messages": 40,
+    "max_tool_output_chars": 8000,
+    "max_message_chars": 20000,
+    "auto_summarize": false,
+    "summarize_after_messages": 80
+  },
+  "policies": {
+    "bash": "ask",
+    "list_files": "ask",
+    "read_file": "ask",
+    "write_file": "ask",
+    "read_document": "ask",
+    "web_search": "ask",
+    "fetch_url": "ask"
+  }
 }
 ```
 
