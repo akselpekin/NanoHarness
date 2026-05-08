@@ -9,6 +9,7 @@ from core.agent import (
     execute_tool,
     stream_assistant_response,
 )
+from core.context import build_context, should_auto_summarize, summarize_session
 from core.paths import APP_DIR, CONFIG_PATH, SESSIONS_DIR
 from core.tui import prompt_user
 
@@ -22,6 +23,7 @@ def build_runtime(config: dict, openai_cls) -> dict:
         "client": openai_cls(api_key=api_key, base_url=base_url),
         "model": model,
         "auditor_model": config.get("auditor_model", model),
+        "summary_model": config.get("summary_model", model),
         "completion_options": _completion_options(config),
         "show_reasoning": config.get("show_reasoning", True),
     }
@@ -103,6 +105,8 @@ def new_session() -> dict:
         "id": sid,
         "created": sid,
         "title": "new session",
+        "summary": "",
+        "summary_message_count": 0,
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}],
     }
 
@@ -256,6 +260,9 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
         print("  /cwd               Show working directory status")
         print("  /cwd set <path>    Set working directory")
         print("  /config            Show config file lookup status")
+        print("  /summarize         Summarize current session")
+        print("  /summary           Show current session summary")
+        print("  /summary clear     Clear current session summary")
         print("  /apikey            Show API key status")
         print("  /apikey set        Add or overwrite API key")
         print("  /apikey delete     Delete API key from config")
@@ -284,6 +291,24 @@ def handle_command(cmd: str, session: dict, config: dict) -> tuple[dict | None, 
 
     elif command == "/config":
         print(f"  Config: {config_status()}")
+        return session, config, False
+
+    elif command == "/summary":
+        subcommand = arg.strip().lower()
+        if subcommand == "clear":
+            session["summary"] = ""
+            session["summary_message_count"] = 0
+            save_session(session)
+            print("  Summary cleared.")
+            return session, config, False
+        if subcommand:
+            print("  Usage: /summary [clear]")
+            return session, config, False
+        summary = session.get("summary", "").strip()
+        if not summary:
+            print("  No summary set for this session.")
+        else:
+            print(f"  Summary:\n{summary}")
         return session, config, False
 
     elif command == "/apikey":
@@ -351,6 +376,16 @@ def run():
                 break
 
             if user_input.startswith("/"):
+                if user_input.strip().lower() == "/summarize":
+                    if runtime is None:
+                        print("  Cannot summarize: model client is unavailable.")
+                        continue
+                    print("  Summarizing current session...")
+                    session["summary"] = summarize_session(runtime["client"], runtime["summary_model"], session)
+                    session["summary_message_count"] = len(session.get("messages", []))
+                    save_session(session)
+                    print("  Summary updated.")
+                    continue
                 result, config, config_changed = handle_command(user_input, session, config)
                 if config_changed:
                     try:
@@ -381,10 +416,14 @@ def run():
             continue
 
         try:
+            if should_auto_summarize(session, config) and runtime is not None:
+                session["summary"] = summarize_session(runtime["client"], runtime["summary_model"], session)
+                session["summary_message_count"] = len(session.get("messages", []))
+                save_session(session)
             assistant_message = stream_assistant_response(
                 runtime["client"],
                 runtime["model"],
-                conversation,
+                build_context(session, config),
                 runtime["completion_options"],
                 runtime["show_reasoning"],
             )

@@ -5,19 +5,27 @@ from datetime import datetime
 from core.paths import APP_DIR, CONFIG_PATH, SESSIONS_DIR
 
 
-CONFIG_VERSION = "v5"
+CONFIG_VERSION = "v6"
 
 REFERENCE_CONFIG = {
     "config_version": CONFIG_VERSION,
     "api_key": "",
     "base_url": "https://openrouter.ai/api/v1",
-    "model": "openai/gpt-5-nano",
+    "model": "openai/gpt-5.4-nano",
     "auditor_model": "openai/gpt-5.4-nano",
+    "summary_model": "openai/gpt-5.4-nano",
     "working_directory": ".",
     "show_reasoning": True,
     "bash": {
         "timeout_seconds": 10,
         "max_output_chars": 12000,
+    },
+    "context": {
+        "recent_messages": 40,
+        "max_tool_output_chars": 8000,
+        "max_message_chars": 20000,
+        "auto_summarize": False,
+        "summarize_after_messages": 80,
     },
     "policies": {
         "bash": "ask",

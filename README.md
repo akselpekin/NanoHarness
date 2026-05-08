@@ -55,6 +55,9 @@ Common commands:
 /cwd             Show working directory status
 /cwd set <path>  Set working directory
 /config          Show app/config/session paths
+/summarize       Summarize current session
+/summary         Show current session summary
+/summary clear   Clear current session summary
 ```
 
 At the prompt, arrow keys work for editing and history navigation.
@@ -100,13 +103,21 @@ Important `config.json` fields:
 {
   "api_key": "",
   "base_url": "https://api.openai.com/v1",
-  "model": "gpt-4.1",
-  "auditor_model": "gpt-4.1",
+  "model": "gpt-5.4-nano",
+  "auditor_model": "gpt-5.4-nano",
+  "summary_model": "gpt-5.4-nano",
   "working_directory": ".",
   "show_reasoning": true,
   "bash": {
     "timeout_seconds": 10,
     "max_output_chars": 12000
+  },
+  "context": {
+    "recent_messages": 40,
+    "max_tool_output_chars": 8000,
+    "max_message_chars": 20000,
+    "auto_summarize": false,
+    "summarize_after_messages": 80
   },
   "policies": {
     "bash": "ask",
@@ -125,11 +136,19 @@ Important `config.json` fields:
     "base_url": "https://openrouter.ai/api/v1",
     "model": "openai/gpt-5.4-nano",
     "auditor_model": "openai/gpt-5.4-nano",
+    "summary_model": "openai/gpt-5.4-nano",
     "working_directory": ".",
     "show_reasoning": true,
     "bash": {
         "timeout_seconds": 10,
         "max_output_chars": 12000,
+    },
+    "context": {
+      "recent_messages": 40,
+      "max_tool_output_chars": 8000,
+      "max_message_chars": 20000,
+      "auto_summarize": false,
+      "summarize_after_messages": 80
     },
     "policies": {
         "bash": "ask",
