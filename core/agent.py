@@ -242,9 +242,6 @@ def _completion_options(config: dict) -> dict:
     options = {}
     if "max_tokens" in config:
         options["max_tokens"] = config["max_tokens"]
-    else:
-        options["max_tokens"] = 4096
-
     extra_body = config.get("extra_body", {})
     if config.get("reasoning") is not None:
         extra_body = dict(extra_body)

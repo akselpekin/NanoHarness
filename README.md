@@ -107,6 +107,7 @@ OpenAI-compatible example:
   "model": "gpt-5.4-nano",
   "auditor_model": "gpt-5.4-nano",
   "summary_model": "gpt-5.4-nano",
+  "max_tokens": 4096,
   "working_directory": ".",
   "show_reasoning": true,
   "bash": {
@@ -141,6 +142,7 @@ OpenRouter example:
   "model": "openai/gpt-5.4-nano",
   "auditor_model": "openai/gpt-5.4-nano",
   "summary_model": "openai/gpt-5.4-nano",
+  "max_tokens": 4096,
   "working_directory": ".",
   "show_reasoning": true,
   "bash": {
@@ -165,5 +167,7 @@ OpenRouter example:
   }
 }
 ```
+
+`max_tokens` is optional. When present, NanoHarness forwards it to the provider as the maximum generated token budget for the assistant turn. Remove it from `config.json` if you want the provider or model default to decide the limit. For long reasoning or long-form responses, raise it only to values supported by your provider/model.
 
 Reasoning output depends on provider and model support. If the provider does not return reasoning deltas, NanoHarness cannot display them even when `show_reasoning` is enabled.

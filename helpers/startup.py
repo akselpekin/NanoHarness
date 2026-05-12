@@ -5,7 +5,7 @@ from datetime import datetime
 from core.paths import APP_DIR, CONFIG_PATH, SESSIONS_DIR
 
 
-CONFIG_VERSION = "v6"
+CONFIG_VERSION = "v7"
 
 REFERENCE_CONFIG = {
     "config_version": CONFIG_VERSION,
