@@ -209,7 +209,7 @@ delete_install() {
 }
 
 print_menu() {
-  info "${APP_NAME} installer"
+  info "${APP_NAME} DEV installer"
   info ""
   info "Installer should be used for -onefile builds from the source."
   info "For regular use consult the releases."
