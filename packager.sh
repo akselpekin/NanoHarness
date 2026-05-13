@@ -28,11 +28,31 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
+sign_payload() {
+  if [[ -z "${APP_IDENTITY:-}" ]]; then
+    info "Skipping payload codesign because APP_IDENTITY is not set."
+    return 0
+  fi
+
+  require_command codesign
+  info "Signing onedir payload with: ${APP_IDENTITY}"
+
+  find "${BUILD_DIR}" -type f \( -perm -111 -o -name '*.dylib' -o -name '*.so' \) -print0 | while IFS= read -r -d '' file; do
+    codesign --force --options runtime --timestamp --sign "${APP_IDENTITY}" ${CODESIGN_EXTRA_ARGS:-} "${file}"
+  done
+
+  codesign --force --options runtime --timestamp --sign "${APP_IDENTITY}" ${CODESIGN_EXTRA_ARGS:-} "${BUILD_DIR}/${EXECUTABLE_NAME}"
+  codesign --verify --deep --strict --verbose=2 "${BUILD_DIR}/${EXECUTABLE_NAME}"
+}
+
 main() {
   require_command pkgbuild
+  require_command productbuild
 
   [[ -d "${BUILD_DIR}" ]] || die "onedir build not found: ${BUILD_DIR}"
   [[ -x "${BUILD_DIR}/${EXECUTABLE_NAME}" ]] || die "executable not found or not executable: ${BUILD_DIR}/${EXECUTABLE_NAME}"
+
+  sign_payload
 
   rm -rf "${PKGROOT}" "${OUT_DIR}" "${SCRIPTS_DIR}"
   mkdir -p "${PKGROOT}${INSTALL_SHARE_DIR}" "${PKGROOT}${INSTALL_BIN_DIR}" "${OUT_DIR}" "${SCRIPTS_DIR}"
@@ -86,7 +106,6 @@ EOF
     "${component_pkg}"
 
   if [[ -n "${INSTALLER_IDENTITY:-}" ]]; then
-    require_command productbuild
     final_pkg="${OUT_DIR}/${APP_NAME}-${VERSION}-signed.pkg"
     info "Signing product package: ${final_pkg}"
     productbuild \
