@@ -1,6 +1,6 @@
 # Custom ignores
 test.txt
-packager.sh
+package_process/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
