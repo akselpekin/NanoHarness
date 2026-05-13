@@ -121,6 +121,11 @@ OpenAI-compatible example:
     "auto_summarize": false,
     "summarize_after_messages": 80
   },
+  "extra_body": {
+        "reasoning": {
+            "effort": "low",
+        },
+  },
   "policies": {
     "bash": "ask",
     "list_files": "ask",

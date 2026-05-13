@@ -211,6 +211,9 @@ delete_install() {
 print_menu() {
   info "${APP_NAME} installer"
   info ""
+  info "Installer should be used for -onefile builds from the source."
+  info "For regular use consult the releases."
+  info ""
   info "1) Install or update ${COMMAND_NAME}"
   info "2) Delete ${COMMAND_NAME}/${CANARY_COMMAND_NAME} from local/global paths and optionally delete ${APP_DATA_DIR}"
   info ""

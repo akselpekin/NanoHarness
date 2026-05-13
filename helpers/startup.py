@@ -5,7 +5,7 @@ from datetime import datetime
 from core.paths import APP_DIR, CONFIG_PATH, SESSIONS_DIR
 
 
-CONFIG_VERSION = "v7"
+CONFIG_VERSION = "v8"
 
 REFERENCE_CONFIG = {
     "config_version": CONFIG_VERSION,
@@ -16,6 +16,11 @@ REFERENCE_CONFIG = {
     "summary_model": "openai/gpt-5.4-nano",
     "working_directory": ".",
     "show_reasoning": True,
+    "extra_body": {
+        "reasoning": {
+            "effort": "low",
+        },
+    },
     "bash": {
         "timeout_seconds": 10,
         "max_output_chars": 12000,
