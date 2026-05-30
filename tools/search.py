@@ -21,13 +21,23 @@ def _strip_tags(text: str) -> str:
     return html.unescape(re.sub(r"\s+", " ", text)).strip()
 
 
+def _decode_duckduckgo_url(href: str) -> str:
+    href = html.unescape(href)
+    if href.startswith("//"):
+        href = "https:" + href
+    parsed = urllib.parse.urlparse(href)
+    if "uddg=" in href:
+        return urllib.parse.parse_qs(parsed.query).get("uddg", [href])[0]
+    return href
+
+
 def web_search(args: dict, base_cwd: str | None = None) -> str:
     query = args.get("query", "")
     if not isinstance(query, str) or not query.strip():
         return json.dumps({"error": "query is required"})
 
     max_results = clamp_int(args.get("max_results"), DEFAULT_SEARCH_RESULTS, 1, MAX_SEARCH_RESULTS)
-    url = "https://duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query})
+    url = "https://lite.duckduckgo.com/lite/?" + urllib.parse.urlencode({"q": query})
     request = urllib.request.Request(url, headers={"User-Agent": "NanoHarness/0"})
 
     try:
@@ -36,19 +46,19 @@ def web_search(args: dict, base_cwd: str | None = None) -> str:
     except Exception as e:
         return json.dumps({"error": f"search failed: {e}", "query": query})
 
+    if "anomaly.js" in html_text or "challenge-form" in html_text:
+        return json.dumps({"error": "search provider returned an anti-bot challenge", "query": query, "provider": "duckduckgo_lite"})
+
     results = []
     pattern = re.compile(
-        r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
-        r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+        r"<a[^>]+href=['\"]([^'\"]+)['\"][^>]+class=['\"]result-link['\"][^>]*>(.*?)</a>.*?"
+        r"<td[^>]+class=['\"]result-snippet['\"][^>]*>(.*?)</td>",
         re.DOTALL,
     )
     for href, title, snippet in pattern.findall(html_text):
-        parsed_href = html.unescape(href)
-        if "uddg=" in parsed_href:
-            parsed_href = urllib.parse.parse_qs(urllib.parse.urlparse(parsed_href).query).get("uddg", [parsed_href])[0]
         results.append({
             "title": _strip_tags(title),
-            "url": parsed_href,
+            "url": _decode_duckduckgo_url(href),
             "snippet": _strip_tags(snippet),
         })
         if len(results) >= max_results:
@@ -56,7 +66,7 @@ def web_search(args: dict, base_cwd: str | None = None) -> str:
 
     return json.dumps({
         "query": query,
-        "provider": "duckduckgo_html",
+        "provider": "duckduckgo_lite",
         "results": results,
         "warning": UNTRUSTED_SEARCH_WARNING,
     })
